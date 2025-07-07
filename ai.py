@@ -1,5 +1,6 @@
 import os
-from dotenv import load_dotenv
+import streamlit as st
+
 from langchain_community.vectorstores import FAISS
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain.prompts import PromptTemplate
@@ -8,8 +9,9 @@ import json
 from datetime import datetime
 
 # 🔐 Load API Key
-load_dotenv()
-os.environ["OPENAI_QNA_API_KEY"] = os.getenv("OPENAI_QNA_API_KEY")
+# load_dotenv()
+# os.environ["OPENAI_QNA_API_KEY"] = os.getenv("OPENAI_QNA_API_KEY")
+api_key = st.secrets["OPENAI_API_KEY"]
 
 # 📚 Load embedding model & FAISS vector store
 embedding_model = OpenAIEmbeddings(model="text-embedding-3-large")
