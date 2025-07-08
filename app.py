@@ -8,7 +8,7 @@ import os
 # Page Configuration
 st.set_page_config(
     page_title="RBI Document Assistant", 
-    layout="wide"
+    layout="wide",
 )
 
 # Convert image to base64

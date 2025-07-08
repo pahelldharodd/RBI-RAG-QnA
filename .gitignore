@@ -3,5 +3,4 @@
 .venv
 index.pkl
 index.faiss
-.streamlit
 secrets.toml
