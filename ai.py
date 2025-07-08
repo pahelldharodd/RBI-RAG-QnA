@@ -51,6 +51,10 @@ Answer:
 Provide a comprehensive, paragraph-wise explanation with legal references, definitions, and examples. Use bullet points where needed. Do not skip any relevant clause. Be verbose and thorough. Consider previous conversation context when relevant.
 """)
 
+from typing import Dict, Any, List, Iterator
+from datetime import datetime
+import json
+
 class RBIChatbotWithContext:
     def __init__(self, max_context_pairs: int = 5):
         """
@@ -63,7 +67,8 @@ class RBIChatbotWithContext:
         self.llm = ChatOpenAI(
             model_name="ft:gpt-4o-2024-08-06:nucfdc:type-shit:BmEV5XZK", #improved fine tune for QnA
             temperature=0.1, 
-            max_tokens=4096
+            max_tokens=2048,
+            streaming=True  # Enable streaming
         )
         
         # 🔗 Create chain
@@ -102,10 +107,121 @@ class RBIChatbotWithContext:
     
         return "\n".join(formatted_context)
     
+    def ask_question_stream(self, question: str, k: int = 4) -> Iterator[Dict[str, Any]]:
+        """
+        Ask a question with conversation context and stream the response
+        
+        Args:
+            question: User's question
+            k: Number of similar documents to retrieve
+            
+        Yields:
+            Dictionary containing streaming chunks, sources, and metadata
+        """
+        self.conversation_count += 1
+        
+        # 🔍 Retrieve relevant documents
+        docs = vectorstore.similarity_search(question, k=10)
+        
+        if not docs:
+            error_response = {
+                "type": "error",
+                "content": "❌ No relevant documents found.",
+                "sources": [],
+                "session_id": self.session_id,
+                "conversation_count": self.conversation_count,
+                "timestamp": datetime.now().isoformat(),
+                "context_length": len(self.conversation_history),
+                "finished": True
+            }
+            yield error_response
+            return
+
+        # 🧠 Combine all docs into context
+        context = "\n\n".join([doc.page_content for doc in docs])
+        
+        # 💭 Get formatted conversation context
+        conversation_context = self._format_conversation_context()
+
+        # 📚 Format sources first
+        sources = []
+        for doc in docs:
+            source = doc.metadata.get("source", "Unknown")
+            chunk = doc.metadata.get("chunk_index", "?")
+            preview = doc.page_content[:500].replace("\n", " ") + "..."
+            sources.append(f"📄 **{source}** — *Chunk {chunk}*\n> {preview}")
+
+        # 🎯 Stream the answer
+        full_answer = ""
+        try:
+            for chunk in self.answer_chain.stream({
+                "context": context, 
+                "question": question,
+                "conversation_context": conversation_context
+            }):
+                chunk_content = chunk.content if hasattr(chunk, 'content') else str(chunk)
+                full_answer += chunk_content
+                
+                yield {
+                    "type": "chunk",
+                    "content": chunk_content,
+                    "sources": sources,
+                    "session_id": self.session_id,
+                    "conversation_count": self.conversation_count,
+                    "timestamp": datetime.now().isoformat(),
+                    "context_length": len(self.conversation_history),
+                    "finished": False
+                }
+            
+            # 🔧 Generate summary after streaming is complete
+            summary_content = self.summarize_conversation(question, full_answer)
+
+            # 💾 Save to conversation history with summary
+            self.conversation_history.append({
+                "question": question,
+                "answer": full_answer,
+                "summary": summary_content,
+                "timestamp": datetime.now().isoformat(),
+                "conversation_number": self.conversation_count
+            })
+
+            # Send final completion message
+            yield {
+                "type": "complete",
+                "content": full_answer,
+                "sources": sources,
+                "session_id": self.session_id,
+                "conversation_count": self.conversation_count,
+                "timestamp": datetime.now().isoformat(),
+                "context_length": len(self.conversation_history),
+                "finished": True
+            }
+            
+        except Exception as e:
+            error_content = f"❌ Error generating answer: {str(e)}"
+            
+            # Still save the question even if answer failed
+            self.conversation_history.append({
+                "question": question,
+                "answer": error_content,
+                "timestamp": datetime.now().isoformat(),
+                "conversation_number": self.conversation_count
+            })
+
+            yield {
+                "type": "error",
+                "content": error_content,
+                "sources": sources,
+                "session_id": self.session_id,
+                "conversation_count": self.conversation_count,
+                "timestamp": datetime.now().isoformat(),
+                "context_length": len(self.conversation_history),
+                "finished": True
+            }
     
     def ask_question(self, question: str, k: int = 4) -> Dict[str, Any]:
         """
-        Ask a question with conversation context
+        Ask a question with conversation context (non-streaming version for backward compatibility)
         
         Args:
             question: User's question
@@ -308,6 +424,29 @@ def ask_question(question: str, k: int = 4) -> tuple:
     result = rbi_chatbot.ask_question(question, k)
     return result["answer"], result["sources"]
 
+# 🌊 New streaming function
+def ask_question_stream(question: str, k: int = 4) -> Iterator[Dict[str, Any]]:
+    """Stream the response for a question"""
+    return rbi_chatbot.ask_question_stream(question, k)
+
+def test_streaming():
+    """Test streaming functionality"""
+    print("\n🌊 Testing Streaming Features")
+    print("=" * 40)
+    
+    question = "What are the key RBI guidelines for banking?"
+    print(f"Question: {question}")
+    print("\nStreaming response:")
+    
+    for chunk in ask_question_stream(question):
+        if chunk["type"] == "chunk":
+            print(chunk["content"], end="", flush=True)
+        elif chunk["type"] == "complete":
+            print(f"\n\n✅ Streaming complete!")
+            print(f"📊 Total sources: {len(chunk['sources'])}")
+        elif chunk["type"] == "error":
+            print(f"\n❌ Error: {chunk['content']}")
+
 def test_context_features():
     """Test various context features"""
     print("\n🧪 Testing Context Features")
@@ -328,5 +467,6 @@ def test_context_features():
     print(f"✅ Context window updated")
 
 if __name__ == "__main__":
-    # Run demo
+    # Run demos
+    test_streaming()
     test_context_features()
